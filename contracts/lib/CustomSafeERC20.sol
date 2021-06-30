@@ -8,25 +8,14 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
  * which allows you to call the safe operations as `token.safeTransfer(...)`, etc.
  */
 library SafeERC20 {
-  function safeTransfer(
-    IERC20 token,
-    address to,
-    uint256 value
-  )
-    internal
-  {
-    require(token.transfer(to, value));
+  function safeTransfer(IERC20 token, address to, uint256 value) internal {
+      require(_callOptionalReturn(token, abi.encodeWithSelector(token.transfer.selector, to, value)),
+          "ERC20 transfer failed");
   }
 
-  function safeTransferFrom(
-    IERC20 token,
-    address from,
-    address to,
-    uint256 value
-  )
-    internal
-  {
-    require(token.transferFrom(from, to, value));
+  function safeTransferFrom(IERC20 token, address from, address to, uint256 value) internal {
+      require(_callOptionalReturn(token, abi.encodeWithSelector(token.transferFrom.selector, from, to, value)),
+          "ERC20 transferFrom failed");
   }
 
   function safeApprove(IERC20 token, address spender, uint256 value) internal {

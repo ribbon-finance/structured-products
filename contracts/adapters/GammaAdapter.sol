@@ -410,7 +410,7 @@ contract GammaAdapter is IProtocolAdapter, DSMath {
 
             require(profitInUnderlying > 0, "Swap is unprofitable");
 
-            IERC20(collateral).safeApprove(UNISWAP_ROUTER, profitInCollateral);
+            collateralToken.safeApprove(UNISWAP_ROUTER, profitInCollateral);
 
             uint256[] memory amountsOut =
                 router.swapExactTokensForETH(
