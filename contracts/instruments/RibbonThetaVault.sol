@@ -13,6 +13,7 @@ import {
 } from "../adapters/IProtocolAdapter.sol";
 import {ProtocolAdapter} from "../adapters/ProtocolAdapter.sol";
 import {IRibbonFactory} from "../interfaces/IRibbonFactory.sol";
+import {IRibbonV2Vault} from "../interfaces/IRibbonV2Vault.sol";
 import {IWETH} from "../interfaces/IWETH.sol";
 import {ISwap, Types} from "../interfaces/ISwap.sol";
 import {OtokenInterface} from "../interfaces/GammaInterface.sol";
@@ -75,6 +76,8 @@ contract RibbonThetaVault is DSMath, OptionsVaultStorage {
 
     event ScheduledWithdrawCompleted(address account, uint256 amount);
 
+    event VaultSunset(address replacement);
+
     /**
      * @notice Initializes the contract with immutable variables
      * @param _asset is the asset used for collateral and premiums
@@ -106,7 +109,6 @@ contract RibbonThetaVault is DSMath, OptionsVaultStorage {
         require(_minimumSupply > 0, "!_minimumSupply");
 
         IRibbonFactory factoryInstance = IRibbonFactory(_factory);
-
         address adapterAddr = factoryInstance.getAdapter(_adapterName);
         require(adapterAddr != address(0), "Adapter not set");
 
@@ -151,6 +153,21 @@ contract RibbonThetaVault is DSMath, OptionsVaultStorage {
         // hardcode the initial withdrawal fee
         instantWithdrawalFee = 0.005 ether;
         feeRecipient = _feeRecipient;
+    }
+
+    /**
+     * @notice Closes the vault and makes it withdraw only.
+     */
+    function sunset(address upgradeTo) external onlyOwner {
+        cap = 0;
+        isSunset = true;
+        instantWithdrawalFee = 0;
+        if (upgradeTo != address(0)) {
+            replacementVault = upgradeTo;
+            IVaultUpgrade = IRibbonV2Vault(upgradeTo);
+        }
+
+        emit VaultSunset(upgradeTo);
     }
 
     /**
@@ -329,6 +346,17 @@ contract RibbonThetaVault is DSMath, OptionsVaultStorage {
     }
 
     /**
+     * @notice Moves msg.sender's deposited funds to new vault w/o fees
+     */
+    function migrate() external nonReentrant {
+        require(isSunset, "Not sunset");
+        require(replacementVault != address(0), "Upgrade address not set");
+
+        uint256 amountAfterFee = _withdraw(maxWithdrawableShares(), false);
+        IVaultUpgrade.depositFor(amountAfterFee, msg.sender);
+    }
+
+    /**
      * @notice Sets the next option the vault will be shorting, and closes the existing short.
      *         This allows all the users to withdraw if the next option is malicious.
      */
@@ -413,6 +441,7 @@ contract RibbonThetaVault is DSMath, OptionsVaultStorage {
             block.timestamp >= nextOptionReadyAt,
             "Cannot roll before delay"
         );
+        require(!isSunset, "Sunset vaults cannot create new positions");
 
         address newOption = nextOption;
         require(newOption != address(0), "No found option");

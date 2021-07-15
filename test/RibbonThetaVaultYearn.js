@@ -196,8 +196,11 @@ function behavesLikeRibbonOptionsVault(params) {
         "m/44'/60'/0'/0/4"
       );
 
-      const { factory, protocolAdapterLib, gammaAdapter } =
-        await getDefaultArgs();
+      const {
+        factory,
+        protocolAdapterLib,
+        gammaAdapter,
+      } = await getDefaultArgs();
       await factory.setAdapter("OPYN_GAMMA", gammaAdapter.address);
 
       this.factory = factory;
@@ -2996,10 +2999,12 @@ function behavesLikeRibbonOptionsVault(params) {
 
         const balanceBeforeWithdraw = await this.assetContract.balanceOf(user);
 
-        const [withdrawAmount, feeAmount] =
-          await this.vault.withdrawAmountWithShares(
-            BigNumber.from("10000000000")
-          );
+        const [
+          withdrawAmount,
+          feeAmount,
+        ] = await this.vault.withdrawAmountWithShares(
+          BigNumber.from("10000000000")
+        );
 
         assert.equal(withdrawAmount.toString(), BigNumber.from("9950000000"));
         assert.equal(feeAmount.toString(), BigNumber.from("50000000"));

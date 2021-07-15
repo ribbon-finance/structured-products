@@ -272,6 +272,15 @@ function behavesLikeRibbonOptionsVault(params) {
         )
       ).connect(userSigner);
 
+      const mockV2Factory = await ethers.getContractFactory(
+        "MockRibbonV2Vault"
+      );
+      const v2contract = await mockV2Factory.deploy(this.asset);
+      this.v2vault = await ethers.getContractAt(
+        "MockRibbonV2Vault",
+        v2contract.address
+      );
+
       await this.vault.connect(ownerSigner).setFeeRecipient(this.vault.address);
       feeRecipient = this.vault.address;
 
@@ -2980,6 +2989,150 @@ function behavesLikeRibbonOptionsVault(params) {
           (await this.vault.instantWithdrawalFee()).toString(),
           parseEther("0.1").toString()
         );
+      });
+    });
+
+    describe("#sunset", () => {
+      time.revertToSnapshotAfterEach();
+
+      it("reverts when not owner", async function () {
+        await expect(
+          this.vault.sunset(this.v2vault.address)
+        ).to.be.revertedWith("Ownable: caller is not the owner");
+      });
+
+      it("succeeds when owner", async function () {
+        await this.vault.connect(ownerSigner).sunset(this.v2vault.address);
+        assert.equal(await this.vault.isSunset(), true);
+
+        assert.equal(await this.vault.replacementVault(), this.v2vault.address);
+      });
+
+      it("deposits fail after sunset", async function () {
+        await this.vault.connect(ownerSigner).sunset(this.v2vault.address);
+        const depositAmount = BigNumber.from("10000000000");
+        await expect(
+          depositIntoVault(params.collateralAsset, this.vault, depositAmount)
+        ).to.be.revertedWith("Cap exceeded");
+      });
+
+      if (params.collateralAsset === WETH_ADDRESS) {
+        it("withdraw funds with no fee", async function () {
+          await this.vault.depositETH({ value: parseEther("1") });
+          await this.vault.connect(ownerSigner).sunset(this.v2vault.address);
+
+          const startETHBalance = await provider.getBalance(user);
+
+          const res = await this.vault.withdrawETH(parseEther("0.1"), {
+            gasPrice,
+          });
+          const receipt = await res.wait();
+          const gasFee = gasPrice.mul(receipt.gasUsed);
+
+          // No fees
+          assert.equal(
+            (await this.assetContract.balanceOf(this.vault.address)).toString(),
+            parseEther("0.9").toString()
+          );
+
+          assert.equal(
+            (await provider.getBalance(user))
+              .add(gasFee)
+              .sub(startETHBalance)
+              .toString(),
+            parseEther("0.1").toString()
+          );
+
+          // Share amount is burned
+          assert.equal(
+            (await this.vault.balanceOf(user)).toString(),
+            parseEther("0.9")
+          );
+
+          assert.equal(
+            (await this.vault.totalSupply()).toString(),
+            parseEther("0.9")
+          );
+
+          await expect(res)
+            .to.emit(this.vault, "Withdraw")
+            .withArgs(
+              user,
+              parseEther("0.1"),
+              parseEther("0.1"),
+              parseEther("0.0")
+            );
+        });
+      } else {
+        it("withdraw funds with no fee", async function () {
+          const depositAmount = BigNumber.from("100000000000");
+          await depositIntoVault(
+            params.collateralAsset,
+            this.vault,
+            depositAmount
+          );
+          await this.vault.connect(ownerSigner).sunset(this.v2vault.address);
+
+          const startAssetBalance = await this.assetContract.balanceOf(user);
+
+          const res = await this.vault.withdraw(BigNumber.from("10000000000"), {
+            gasPrice,
+          });
+          await res.wait();
+
+          assert.equal(
+            (await this.assetContract.balanceOf(this.vault.address)).toString(),
+            BigNumber.from("90000000000").toString()
+          );
+
+          assert.equal(
+            (await this.assetContract.balanceOf(user))
+              .sub(startAssetBalance)
+              .toString(),
+            BigNumber.from("10000000000").toString()
+          );
+
+          // Share amount is burned
+          assert.equal(
+            (await this.vault.balanceOf(user)).toString(),
+            BigNumber.from("90000000000")
+          );
+
+          assert.equal(
+            (await this.vault.totalSupply()).toString(),
+            BigNumber.from("90000000000")
+          );
+
+          await expect(res)
+            .to.emit(this.vault, "Withdraw")
+            .withArgs(
+              user,
+              BigNumber.from("10000000000"),
+              BigNumber.from("10000000000"),
+              BigNumber.from("0")
+            );
+        });
+      }
+
+      it("migrate calls V2 depositFor with correct address and amount", async function () {
+        const depositAmount = BigNumber.from("1000000000");
+        await depositIntoVault(
+          params.collateralAsset,
+          this.vault,
+          depositAmount
+        );
+        await expect(await this.vault.balanceOf(user)).to.be.above(0);
+
+        await expect(this.vault.migrate()).to.be.revertedWith("Not sunset");
+
+        await this.vault.connect(ownerSigner).sunset(this.v2vault.address);
+
+        await this.vault.migrate();
+
+        await expect(await this.vault.balanceOf(user)).to.be.equal(0);
+        await expect(
+          await this.vault.asset.balanceOf(this.vault.address)
+        ).to.be.equal(0);
       });
     });
 
